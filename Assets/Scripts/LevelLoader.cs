@@ -10,6 +10,7 @@ public class LevelLoader : MonoBehaviour
     [SerializeField] private GameObject cubePrefab;
     [SerializeField] private GameObject floorPrefab;
     [SerializeField] private GameObject groundPrefab;
+    [SerializeField] private GameObject lowerGroundPrefab;
     [SerializeField] private Material[] materials;  // Array of 9 materials, index 0 = blue (for ID 1)
 
     [Header("Grid Settings")]
@@ -215,11 +216,11 @@ public class LevelLoader : MonoBehaviour
 
         // Create all level elements
         CreateFloorGrid(rows, cols, floorParent);
-        CreateGround(rows, cols, groundParent);
         CreateCubeGrid(grid, cubesParent);
 
         // Scale and position the entire level
         ScaleAndPositionLevel(levelParent, rows, cols);
+        CreateGround(rows, cols, groundParent);
 
         Debug.Log($"Successfully created level with {rows} rows and {cols} columns");
     }
@@ -233,7 +234,10 @@ public class LevelLoader : MonoBehaviour
             {
                 // Calculate position for floor tile
                 float x = col * (cubeSize + spacing);
-                float z = row * (cubeSize + spacing);
+
+                // Invert row position to start from top instead of bottom
+                float z = (rows - 1 - row) * (cubeSize + spacing);
+
                 Vector3 position = new Vector3(x, 0, z);
 
                 // Instantiate floor tile
@@ -241,35 +245,42 @@ public class LevelLoader : MonoBehaviour
                 floor.name = $"Floor_{row}_{col}";
 
                 // Ensure floor is properly sized
-                floor.transform.localScale = new Vector3(cubeSize, 0.1f, cubeSize);
+                floor.transform.localScale = new Vector3(cubeSize, 2f, cubeSize);
             }
         }
     }
 
     private void CreateGround(int rows, int cols, GameObject groundParent)
     {
-        // Calculate grid dimensions
+        // Calculate grid dimensions for scaling
         float gridWidth = cols * (cubeSize + spacing) - spacing;
         float gridHeight = rows * (cubeSize + spacing) - spacing;
 
-        // Position ground at the center of the grid, below the floor
-        Vector3 groundPosition = new Vector3(
-            gridWidth / 2f - (cubeSize / 2f),
-            -0.5f, // Position it below the floor
-            gridHeight / 2f - (cubeSize / 2f)
-        );
-
-        // Scale the ground to match the grid size
-        Vector3 groundScale = new Vector3(
-            gridWidth,
+        // Create top floor (1 unit larger than grid in each direction)
+        Vector3 topFloorScale = new Vector3(
+            gridWidth + 1.5f,
             1f,
-            gridHeight
+            gridHeight + 1.5f
         );
 
-        // Instantiate the ground
-        GameObject ground = Instantiate(groundPrefab, groundPosition, Quaternion.identity, groundParent.transform);
-        ground.name = "Ground";
-        ground.transform.localScale = groundScale;
+        // Create bottom floor (2 units larger than grid in each direction)
+        Vector3 bottomFloorScale = new Vector3(
+            gridWidth + 2f,
+            1f,
+            gridHeight + 2f
+        );
+
+        // Instantiate the top floor
+        GameObject topFloor = Instantiate(groundPrefab, Vector3.zero, Quaternion.identity, groundParent.transform);
+        topFloor.name = "TopFloor";
+        topFloor.transform.position = new Vector3(0f, -0.9f, 0f);
+        topFloor.transform.localScale = topFloorScale;
+
+        // Instantiate the bottom floor (slightly lower)
+        GameObject bottomFloor = Instantiate(lowerGroundPrefab, Vector3.zero, Quaternion.identity, groundParent.transform);
+        bottomFloor.name = "BottomFloor";
+        bottomFloor.transform.position = new Vector3(0f, -0.95f, 0f);  // Lower position
+        bottomFloor.transform.localScale = bottomFloorScale;
     }
 
     private void CreateCubeGrid(List<List<int>> grid, GameObject cubesParent)
@@ -289,7 +300,11 @@ public class LevelLoader : MonoBehaviour
                 // Calculate position (cubes are one unit above the floor)
                 float x = col * (cubeSize + spacing);
                 float y = cubeSize / 2f; // Position it above the floor
-                float z = row * (cubeSize + spacing);
+
+                // Invert row position to start from top instead of bottom
+                // This makes (0,0) appear at the top-left
+                float z = (rows - 1 - row) * (cubeSize + spacing);
+
                 Vector3 position = new Vector3(x, y, z);
 
                 // Instantiate cube
@@ -318,30 +333,73 @@ public class LevelLoader : MonoBehaviour
         float gridWidth = cols * (cubeSize + spacing) - spacing;
         float gridHeight = rows * (cubeSize + spacing) - spacing;
 
+        Debug.Log($"Grid dimensions: Width={gridWidth}, Height={gridHeight}");
+
+        // Find the center row and column (for odd-sized grids)
+        int centerRow = (rows - 1) / 2;
+        int centerCol = (cols - 1) / 2;
+        Debug.Log($"Center indices: Row={centerRow}, Col={centerCol}");
+
+        // Find the actual center cube to check its position
+        Transform cubesParent = levelParent.transform.Find("Cubes");
+        if (cubesParent != null)
+        {
+            // Log positions of some cubes before any transformations
+            foreach (Transform cube in cubesParent)
+            {
+                Debug.Log($"Cube {cube.name} original position: {cube.position}");
+            }
+        }
+
+        // Calculate true center position in local space
+        Vector3 gridCenter = new Vector3(
+            (cols - 1) / 2f * (cubeSize + spacing),
+            0f,
+            (rows - 1) / 2f * (cubeSize + spacing)
+        );
+        Debug.Log($"Calculated grid center (local space): {gridCenter}");
+
         // Determine which dimension is longer
         float longestDimension = Mathf.Max(gridWidth, gridHeight);
 
         // Calculate scale factor to fit within play area
         float scaleFactor = maxPlayAreaSize / longestDimension;
+        Debug.Log($"Scale factor: {scaleFactor}");
 
         // Apply scale to the level parent
         levelParent.transform.localScale = new Vector3(scaleFactor, scaleFactor, scaleFactor);
-
-        // Calculate scaled dimensions
-        float scaledWidth = gridWidth * scaleFactor;
-        float scaledHeight = gridHeight * scaleFactor;
+        Debug.Log($"Applied scale to level parent: {levelParent.transform.localScale}");
 
         // Calculate offset to center the grid at origin
         Vector3 centerOffset = new Vector3(
-            -scaledWidth / 2f,
+            -gridCenter.x * scaleFactor,
             0f,
-            -scaledHeight / 2f
+            -gridCenter.z * scaleFactor
         );
+        Debug.Log($"Calculated center offset: {centerOffset}");
 
         // Apply position offset
-        levelParent.transform.position = centerOffset + new Vector3(1.2f, 0, 1.2f);
+        levelParent.transform.position = centerOffset;
+        Debug.Log($"Applied position to level parent: {levelParent.transform.position}");
 
-        Debug.Log($"Scaled level by factor {scaleFactor} and centered at {centerOffset}");
+        // Log final positions of cubes after all transformations
+        if (cubesParent != null)
+        {
+            // Wait a frame to ensure transforms are updated
+            StartCoroutine(LogFinalPositionsNextFrame(cubesParent));
+        }
+    }
+
+    private IEnumerator LogFinalPositionsNextFrame(Transform cubesParent)
+    {
+        // Wait for the end of frame to ensure transforms are updated
+        yield return new WaitForEndOfFrame();
+
+        // Log positions of some cubes after transformations
+        foreach (Transform cube in cubesParent)
+        {
+            Debug.Log($"Cube {cube.name} final position: {cube.position}");
+        }
     }
 
     // Add this for runtime debugging

@@ -16003,7 +16003,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1317534803}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: b421d6f16a007499da501d2017bb8140, type: 3}
   m_Name: 
@@ -17344,7 +17344,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   cubePrefab: {fileID: 7165319334418482619, guid: 071984db89ed84398ab2cd7107688250, type: 3}
   floorPrefab: {fileID: 5817469507671302661, guid: a6e8bda3917ab4033aa872b2befd3f61, type: 3}
-  groundPrefab: {fileID: 3272919594625719246, guid: c3cc0d6170e5b4a20951e67fbbfb621b, type: 3}
+  groundPrefab: {fileID: 8375711755690983811, guid: 3bc34f7d2b6f540b5badc5c668a90838, type: 3}
+  lowerGroundPrefab: {fileID: 6206656223226211488, guid: 054aaa66b58aa442fa74ac6ba841c408, type: 3}
   materials:
   - {fileID: 2100000, guid: 05826aca12eb24f3895f6cf375ddcd5c, type: 2}
   - {fileID: 2100000, guid: 6f182d53107314f42806ffe5e8d7ca4b, type: 2}
@@ -17357,10 +17358,10 @@ MonoBehaviour:
   - {fileID: 2100000, guid: a2a07ebd95e384e2ea5818c101cf1232, type: 2}
   cubeSize: 1
   spacing: 0
-  maxPlayAreaSize: 15
+  maxPlayAreaSize: 17
   useDebugGrid: 1
-  debugRows: 8
-  debugCols: 8
+  debugRows: 16
+  debugCols: 16
 --- !u!1 &1483450710
 GameObject:
   m_ObjectHideFlags: 0
@@ -22378,37 +22379,6 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2008593952}
   m_Mesh: {fileID: -5495902117074765545, guid: e4d4ebad085fe45ef99ff1e32e6de648, type: 3}
---- !u!1 &2014692656
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 2014692657}
-  m_Layer: 0
-  m_Name: GameObject
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &2014692657
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2014692656}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &2039318899
 GameObject:
   m_ObjectHideFlags: 0
@@ -23679,7 +23649,6 @@ SceneRoots:
   - {fileID: 1848465739}
   - {fileID: 1317534804}
   - {fileID: 1409931718}
-  - {fileID: 2014692657}
   - {fileID: 406339706}
   - {fileID: 322805367}
   - {fileID: 411197289}
