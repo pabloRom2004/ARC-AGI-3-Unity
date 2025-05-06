@@ -6,33 +6,29 @@ using System.Text.RegularExpressions;
 
 public class LevelLoader : MonoBehaviour
 {
-    [Header("Prefabs and Materials")]
-    [SerializeField] private GameObject cubePrefab;
-    [SerializeField] private GameObject floorPrefab;
-    [SerializeField] private GameObject groundPrefab;
-    [SerializeField] private GameObject lowerGroundPrefab;
-    [SerializeField] private Material[] materials;  // Array of 9 materials, index 0 = blue (for ID 1)
-
-    [Header("Grid Settings")]
-    [SerializeField] private float cubeSize = 1f;
-    [SerializeField] private float spacing = 0f;
-    [SerializeField] private float maxPlayAreaSize = 18f; // 9 units in each direction from center
-
-    [Header("Debug Settings")]
+    [Header("Settings")]
     [SerializeField] private bool useDebugGrid = false;
     [SerializeField] private int debugRows = 8;
     [SerializeField] private int debugCols = 8;
 
     private string levelDataPath;
-    private List<List<int>> gridData;
+    private GameStateManager gameStateManager;
 
     void Start()
     {
+        // Find or create the GameStateManager
+        gameStateManager = FindFirstObjectByType<GameStateManager>();
+        if (gameStateManager == null)
+        {
+            Debug.LogError("GameStateManager not found in the scene!");
+            return;
+        }
+
         levelDataPath = Path.Combine(Application.streamingAssetsPath, "levelTest.json");
         LoadLevel();
     }
 
-    private void LoadLevel()
+    public void LoadLevel()
     {
         if (useDebugGrid)
         {
@@ -41,7 +37,7 @@ public class LevelLoader : MonoBehaviour
         }
         else
         {
-            // Load from JSON as before
+            // Load from JSON
             LoadFromJson();
         }
     }
@@ -57,10 +53,9 @@ public class LevelLoader : MonoBehaviour
 
         // Read the JSON file
         string jsonText = File.ReadAllText(levelDataPath);
-        Debug.Log("Successfully read JSON file, parsing...");
 
         // Parse the grid data manually
-        gridData = ExtractInputGrid(jsonText);
+        List<List<int>> gridData = ExtractInputGrid(jsonText);
 
         if (gridData == null || gridData.Count == 0)
         {
@@ -68,16 +63,16 @@ public class LevelLoader : MonoBehaviour
             return;
         }
 
-        Debug.Log($"Successfully parsed grid with dimensions: {gridData.Count}x{gridData[0].Count}");
+        // Extract interaction data
+        List<InteractionData> interactionData = ExtractInteractionData(jsonText);
 
-        // Create the complete level
-        CreateLevel(gridData);
+        // Pass the grid and interaction data to the Game State Manager
+        gameStateManager.InitializeGrid(gridData);
+        gameStateManager.SetInteractionData(interactionData);
     }
 
     private void CreateDebugGrid(int rows, int cols)
     {
-        Debug.Log($"Creating debug grid with dimensions: {rows}x{cols}");
-
         // Create a test pattern grid
         List<List<int>> debugGrid = new List<List<int>>();
 
@@ -111,8 +106,39 @@ public class LevelLoader : MonoBehaviour
             debugGrid.Add(row);
         }
 
-        // Create the complete level with the debug grid
-        CreateLevel(debugGrid);
+        // Create some debug interactions
+        List<InteractionData> debugInteractions = new List<InteractionData>();
+        
+        // Add a "PickUp" interaction
+        InteractionData pickUpInteraction = new InteractionData();
+        pickUpInteraction.scriptType = "PickUp";
+        pickUpInteraction.blocks = new List<Vector2Int>
+        {
+            new Vector2Int(1, 1),
+            new Vector2Int(2, 1),
+            new Vector2Int(1, 2),
+            new Vector2Int(2, 2)
+        };
+        debugInteractions.Add(pickUpInteraction);
+        
+        // Add a "Move" interaction
+        InteractionData moveInteraction = new InteractionData();
+        moveInteraction.scriptType = "Move";
+        moveInteraction.canMoveUp = true;
+        moveInteraction.canMoveDown = true;
+        moveInteraction.canMoveLeft = true;
+        moveInteraction.canMoveRight = true;
+        moveInteraction.blocks = new List<Vector2Int>
+        {
+            new Vector2Int(cols - 2, 1),
+            new Vector2Int(cols - 2, 2),
+            new Vector2Int(cols - 3, 2)
+        };
+        debugInteractions.Add(moveInteraction);
+
+        // Pass the debug grid and interactions to the Game State Manager
+        gameStateManager.InitializeGrid(debugGrid);
+        gameStateManager.SetInteractionData(debugInteractions);
     }
 
     private List<List<int>> ExtractInputGrid(string jsonText)
@@ -149,6 +175,128 @@ public class LevelLoader : MonoBehaviour
             Debug.LogError("Error parsing input grid: " + e.Message);
             return null;
         }
+    }
+
+    // Add method to extract interaction data from JSON
+    private List<InteractionData> ExtractInteractionData(string jsonText)
+    {
+        List<InteractionData> interactions = new List<InteractionData>();
+        
+        try
+        {
+            // Extract the "interactions" array from JSON
+            int interactionsStartIndex = jsonText.IndexOf("\"interactions\":");
+            if (interactionsStartIndex == -1) return interactions;
+
+            // Find the start of the array
+            int arrayStartIndex = jsonText.IndexOf("[", interactionsStartIndex);
+            if (arrayStartIndex == -1) return interactions;
+
+            // Find the matching end bracket for the outer array
+            int bracketCount = 1;
+            int arrayEndIndex = arrayStartIndex + 1;
+
+            while (bracketCount > 0 && arrayEndIndex < jsonText.Length)
+            {
+                if (jsonText[arrayEndIndex] == '[') bracketCount++;
+                else if (jsonText[arrayEndIndex] == ']') bracketCount--;
+                arrayEndIndex++;
+            }
+
+            // Extract the array portion
+            string arrayText = jsonText.Substring(arrayStartIndex, arrayEndIndex - arrayStartIndex);
+
+            // Parse the interactions array
+            return ParseInteractionsArray(arrayText);
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("Error parsing interactions: " + e.Message);
+            return interactions;
+        }
+    }
+
+    private List<InteractionData> ParseInteractionsArray(string arrayText)
+    {
+        List<InteractionData> interactions = new List<InteractionData>();
+        
+        // Use regex to find all interaction objects
+        Regex interactionPattern = new Regex(@"\{(.*?)\}", RegexOptions.Singleline);
+        MatchCollection matches = interactionPattern.Matches(arrayText);
+
+        foreach (Match match in matches)
+        {
+            string interactionText = match.Value;
+            InteractionData interaction = new InteractionData();
+            
+            // Extract script type
+            Regex scriptPattern = new Regex(@"""script"":\s*""(\w+)""");
+            Match scriptMatch = scriptPattern.Match(interactionText);
+            if (scriptMatch.Success)
+            {
+                interaction.scriptType = scriptMatch.Groups[1].Value;
+            }
+            
+            // Extract movement directions if present
+            if (interaction.scriptType == "Move")
+            {
+                // Up
+                Regex upPattern = new Regex(@"""up"":\s*(true|false)");
+                Match upMatch = upPattern.Match(interactionText);
+                if (upMatch.Success)
+                {
+                    interaction.canMoveUp = upMatch.Groups[1].Value.ToLower() == "true";
+                }
+                
+                // Down
+                Regex downPattern = new Regex(@"""down"":\s*(true|false)");
+                Match downMatch = downPattern.Match(interactionText);
+                if (downMatch.Success)
+                {
+                    interaction.canMoveDown = downMatch.Groups[1].Value.ToLower() == "true";
+                }
+                
+                // Left
+                Regex leftPattern = new Regex(@"""left"":\s*(true|false)");
+                Match leftMatch = leftPattern.Match(interactionText);
+                if (leftMatch.Success)
+                {
+                    interaction.canMoveLeft = leftMatch.Groups[1].Value.ToLower() == "true";
+                }
+                
+                // Right
+                Regex rightPattern = new Regex(@"""right"":\s*(true|false)");
+                Match rightMatch = rightPattern.Match(interactionText);
+                if (rightMatch.Success)
+                {
+                    interaction.canMoveRight = rightMatch.Groups[1].Value.ToLower() == "true";
+                }
+            }
+            
+            // Extract blocks array
+            Regex blocksPattern = new Regex(@"""blocks"":\s*(\[\[.*?\]\])", RegexOptions.Singleline);
+            Match blocksMatch = blocksPattern.Match(interactionText);
+            if (blocksMatch.Success)
+            {
+                string blocksArrayText = blocksMatch.Groups[1].Value;
+                
+                // Parse individual block coordinates
+                Regex blockCoordPattern = new Regex(@"\[(\d+),\s*(\d+)\]");
+                MatchCollection blockMatches = blockCoordPattern.Matches(blocksArrayText);
+                
+                foreach (Match blockMatch in blockMatches)
+                {
+                    int row = int.Parse(blockMatch.Groups[1].Value);
+                    int col = int.Parse(blockMatch.Groups[2].Value);
+                    interaction.blocks.Add(new Vector2Int(col, row)); // Note: Using col,row for Unity coordinates
+                }
+            }
+            
+            interactions.Add(interaction);
+        }
+        
+        Debug.Log($"Parsed {interactions.Count} interaction groups from JSON");
+        return interactions;
     }
 
     private List<List<int>> Parse2DArray(string arrayText)
@@ -188,221 +336,7 @@ public class LevelLoader : MonoBehaviour
         return result;
     }
 
-    private void CreateLevel(List<List<int>> grid)
-    {
-        int rows = grid.Count;
-        if (rows == 0) return;
-
-        int cols = grid[0].Count;
-
-        // Clear any existing level
-        GameObject existingLevel = GameObject.Find("Level");
-        if (existingLevel != null)
-        {
-            DestroyImmediate(existingLevel);
-        }
-
-        // Create a parent object for the entire level
-        GameObject levelParent = new GameObject("Level");
-
-        // Create separate parent objects for organization
-        GameObject cubesParent = new GameObject("Cubes");
-        GameObject floorParent = new GameObject("Floor");
-        GameObject groundParent = new GameObject("Ground");
-
-        cubesParent.transform.parent = levelParent.transform;
-        floorParent.transform.parent = levelParent.transform;
-        groundParent.transform.parent = levelParent.transform;
-
-        // Create all level elements
-        CreateFloorGrid(rows, cols, floorParent);
-        CreateCubeGrid(grid, cubesParent);
-
-        // Scale and position the entire level
-        ScaleAndPositionLevel(levelParent, rows, cols);
-        CreateGround(rows, cols, groundParent);
-
-        Debug.Log($"Successfully created level with {rows} rows and {cols} columns");
-    }
-
-    private void CreateFloorGrid(int rows, int cols, GameObject floorParent)
-    {
-        // Create floor tiles for every position in the grid
-        for (int row = 0; row < rows; row++)
-        {
-            for (int col = 0; col < cols; col++)
-            {
-                // Calculate position for floor tile
-                float x = col * (cubeSize + spacing);
-
-                // Invert row position to start from top instead of bottom
-                float z = (rows - 1 - row) * (cubeSize + spacing);
-
-                Vector3 position = new Vector3(x, 0, z);
-
-                // Instantiate floor tile
-                GameObject floor = Instantiate(floorPrefab, position, Quaternion.identity, floorParent.transform);
-                floor.name = $"Floor_{row}_{col}";
-
-                // Ensure floor is properly sized
-                floor.transform.localScale = new Vector3(cubeSize, 2f, cubeSize);
-            }
-        }
-    }
-
-    private void CreateGround(int rows, int cols, GameObject groundParent)
-    {
-        // Calculate grid dimensions for scaling
-        float gridWidth = cols * (cubeSize + spacing) - spacing;
-        float gridHeight = rows * (cubeSize + spacing) - spacing;
-
-        // Create top floor (1 unit larger than grid in each direction)
-        Vector3 topFloorScale = new Vector3(
-            gridWidth + 1.5f,
-            1f,
-            gridHeight + 1.5f
-        );
-
-        // Create bottom floor (2 units larger than grid in each direction)
-        Vector3 bottomFloorScale = new Vector3(
-            gridWidth + 2f,
-            1f,
-            gridHeight + 2f
-        );
-
-        // Instantiate the top floor
-        GameObject topFloor = Instantiate(groundPrefab, Vector3.zero, Quaternion.identity, groundParent.transform);
-        topFloor.name = "TopFloor";
-        topFloor.transform.position = new Vector3(0f, -0.9f, 0f);
-        topFloor.transform.localScale = topFloorScale;
-
-        // Instantiate the bottom floor (slightly lower)
-        GameObject bottomFloor = Instantiate(lowerGroundPrefab, Vector3.zero, Quaternion.identity, groundParent.transform);
-        bottomFloor.name = "BottomFloor";
-        bottomFloor.transform.position = new Vector3(0f, -0.95f, 0f);  // Lower position
-        bottomFloor.transform.localScale = bottomFloorScale;
-    }
-
-    private void CreateCubeGrid(List<List<int>> grid, GameObject cubesParent)
-    {
-        int rows = grid.Count;
-        int cols = grid[0].Count;
-
-        for (int row = 0; row < rows; row++)
-        {
-            for (int col = 0; col < cols; col++)
-            {
-                int id = grid[row][col];
-
-                // Skip empty spaces (ID 0)
-                if (id == 0) continue;
-
-                // Calculate position (cubes are one unit above the floor)
-                float x = col * (cubeSize + spacing);
-                float y = cubeSize / 2f; // Position it above the floor
-
-                // Invert row position to start from top instead of bottom
-                // This makes (0,0) appear at the top-left
-                float z = (rows - 1 - row) * (cubeSize + spacing);
-
-                Vector3 position = new Vector3(x, y, z);
-
-                // Instantiate cube
-                GameObject cube = Instantiate(cubePrefab, position, Quaternion.identity, cubesParent.transform);
-                cube.name = $"Cube_{row}_{col}_ID{id}";
-
-                // Ensure cube is properly sized
-                cube.transform.localScale = new Vector3(cubeSize, cubeSize, cubeSize);
-
-                // Assign material based on ID (ID 1 uses materials[0], etc.)
-                if (id >= 1 && id <= 9 && id - 1 < materials.Length)
-                {
-                    MeshRenderer renderer = cube.GetComponentInChildren<MeshRenderer>();
-                    if (renderer != null)
-                    {
-                        renderer.material = materials[id - 1];
-                    }
-                }
-            }
-        }
-    }
-
-    private void ScaleAndPositionLevel(GameObject levelParent, int rows, int cols)
-    {
-        // Calculate current grid dimensions
-        float gridWidth = cols * (cubeSize + spacing) - spacing;
-        float gridHeight = rows * (cubeSize + spacing) - spacing;
-
-        Debug.Log($"Grid dimensions: Width={gridWidth}, Height={gridHeight}");
-
-        // Find the center row and column (for odd-sized grids)
-        int centerRow = (rows - 1) / 2;
-        int centerCol = (cols - 1) / 2;
-        Debug.Log($"Center indices: Row={centerRow}, Col={centerCol}");
-
-        // Find the actual center cube to check its position
-        Transform cubesParent = levelParent.transform.Find("Cubes");
-        if (cubesParent != null)
-        {
-            // Log positions of some cubes before any transformations
-            foreach (Transform cube in cubesParent)
-            {
-                Debug.Log($"Cube {cube.name} original position: {cube.position}");
-            }
-        }
-
-        // Calculate true center position in local space
-        Vector3 gridCenter = new Vector3(
-            (cols - 1) / 2f * (cubeSize + spacing),
-            0f,
-            (rows - 1) / 2f * (cubeSize + spacing)
-        );
-        Debug.Log($"Calculated grid center (local space): {gridCenter}");
-
-        // Determine which dimension is longer
-        float longestDimension = Mathf.Max(gridWidth, gridHeight);
-
-        // Calculate scale factor to fit within play area
-        float scaleFactor = maxPlayAreaSize / longestDimension;
-        Debug.Log($"Scale factor: {scaleFactor}");
-
-        // Apply scale to the level parent
-        levelParent.transform.localScale = new Vector3(scaleFactor, scaleFactor, scaleFactor);
-        Debug.Log($"Applied scale to level parent: {levelParent.transform.localScale}");
-
-        // Calculate offset to center the grid at origin
-        Vector3 centerOffset = new Vector3(
-            -gridCenter.x * scaleFactor,
-            0f,
-            -gridCenter.z * scaleFactor
-        );
-        Debug.Log($"Calculated center offset: {centerOffset}");
-
-        // Apply position offset
-        levelParent.transform.position = centerOffset;
-        Debug.Log($"Applied position to level parent: {levelParent.transform.position}");
-
-        // Log final positions of cubes after all transformations
-        if (cubesParent != null)
-        {
-            // Wait a frame to ensure transforms are updated
-            StartCoroutine(LogFinalPositionsNextFrame(cubesParent));
-        }
-    }
-
-    private IEnumerator LogFinalPositionsNextFrame(Transform cubesParent)
-    {
-        // Wait for the end of frame to ensure transforms are updated
-        yield return new WaitForEndOfFrame();
-
-        // Log positions of some cubes after transformations
-        foreach (Transform cube in cubesParent)
-        {
-            Debug.Log($"Cube {cube.name} final position: {cube.position}");
-        }
-    }
-
-    // Add this for runtime debugging
+    // Method to reload level (for debugging or UI calls)
     public void ReloadWithDebugSize()
     {
         useDebugGrid = true;
