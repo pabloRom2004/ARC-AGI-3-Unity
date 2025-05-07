@@ -1,10 +1,12 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
 public class CubeMovement : MonoBehaviour
 {
-    [SerializeField] private float smoothSpeed = 10f;
+    private float smoothSpeed = 20f;
+    private float animationDelayBetweenCubes = 0.025f; // Delay between cube animations
 
     private Camera mainCamera;
     private bool isDragging = false;
@@ -15,6 +17,17 @@ public class CubeMovement : MonoBehaviour
     private List<Transform> childCubes = new List<Transform>();
     private List<Vector2Int> childRelativePositions = new List<Vector2Int>();
     private List<int> childBlockIDs = new List<int>();
+    private List<Animator> cubeAnimators = new List<Animator>(); // List of all cube animators
+    private Dictionary<Collider, Animator> colliderToAnimator = new Dictionary<Collider, Animator>(); // Map colliders to animators
+
+    // Animation trigger names
+    private const string HOVER_ENTER_TRIGGER = "MoveHoverEnter";
+    private const string HOVER_EXIT_TRIGGER = "MoveHoverExit";
+    private const string CLICK_TRIGGER = "MoveClick";
+    private const string RELEASE_TRIGGER = "MoveRelease";
+
+    private bool isHovering = false; // Track if we're currently hovering over any part of the shape
+    private bool hoverEnterAnimationPlayed = false; // Track if hover enter animation has been played for this hover session
 
     private void Start()
     {
@@ -22,107 +35,97 @@ public class CubeMovement : MonoBehaviour
         targetPosition = transform.position;
         currentGridPos = GridManager.Instance.WorldToGrid(transform.position);
 
-        // Add this cube if it has a renderer
-        Renderer ownRenderer = GetComponent<Renderer>();
-        if (ownRenderer != null)
-        {
-            childCubes.Add(transform);
-            childRelativePositions.Add(new Vector2Int(0, 0)); // Relative to itself is 0,0
-            childBlockIDs.Add(GridManager.Instance.GetColorID(ownRenderer.material));
-        }
+        // Find all child cube holders with their colliders and animators
+        CollectCubeComponents();
+    }
 
-        // Find all child cubes
-        foreach (Transform child in transform)
+    private void CollectCubeComponents()
+    {
+        // Process all direct children of the parent (these are the individual cubes)
+        foreach (Transform cube in transform)
         {
-            Renderer childRenderer = child.GetComponent<Renderer>();
-            if (childRenderer != null && child.GetComponent<Collider>() != null)
+            // Find the cube holder in each cube that has the collider and animator
+            Collider holderCollider = null;
+            Animator holderAnimator = null;
+
+            // First check if the cube itself has what we need
+            holderCollider = cube.GetComponent<Collider>();
+            holderAnimator = cube.GetComponent<Animator>();
+
+            // If not, look for a "Cube Holder" child
+            if (holderCollider == null || holderAnimator == null)
             {
-                childCubes.Add(child);
+                // Find the holder among the children
+                foreach (Transform holder in cube)
+                {
+                    // Try to find the holder with both collider and animator
+                    Collider collider = holder.GetComponent<Collider>();
+                    Animator animator = holder.GetComponent<Animator>();
+
+                    if (collider != null)
+                        holderCollider = collider;
+
+                    if (animator != null)
+                        holderAnimator = animator;
+
+                    // If both found, we can stop looking
+                    if (holderCollider != null && holderAnimator != null)
+                        break;
+                }
+            }
+
+            // If we found both components, add them to our tracking lists
+            if (holderCollider != null && holderAnimator != null)
+            {
+                childCubes.Add(cube);
 
                 // Calculate relative grid position
-                Vector3 relativePos = child.position - transform.position;
+                Vector3 relativePos = cube.position - transform.position;
                 Vector2Int relativeGridPos = new Vector2Int(
                     Mathf.RoundToInt(relativePos.x),
                     Mathf.RoundToInt(relativePos.z) // Map world Z to grid Y
                 );
                 childRelativePositions.Add(relativeGridPos);
 
-                // Get block ID
-                int blockID = GridManager.Instance.GetColorID(childRenderer.material);
-                childBlockIDs.Add(blockID);
-            }
-        }
-    }
-
-    private Vector3 SnapToGrid(Vector3 position)
-    {
-        return new Vector3(
-            Mathf.Round(position.x),
-            position.y,
-            Mathf.Round(position.z)
-        );
-    }
-
-    private bool IsMoveValid(Vector2Int from, Vector2Int to)
-    {
-        // Only allow movement of 1 grid cell at a time (Manhattan distance)
-        int distance = Mathf.Abs(to.x - from.x) + Mathf.Abs(to.y - from.y);
-
-        // Only allow orthogonal movement (not diagonal)
-        bool isOrthogonal = (to.x == from.x || to.y == from.y);
-
-        // Return true if move is only 1 cell away and orthogonal
-        return distance <= 1 && isOrthogonal && CanMoveTo(to);
-    }
-
-    private bool CanMoveTo(Vector2Int targetGridPos)
-    {
-        // Check each child position
-        for (int i = 0; i < childCubes.Count; i++)
-        {
-            Vector2Int childTargetPos = targetGridPos + childRelativePositions[i];
-
-            // Check if position is valid
-            if (!GridManager.Instance.IsInBounds(childTargetPos))
-                return false;
-
-            // Check if position is empty or occupied by this group
-            if (!GridManager.Instance.IsPositionEmpty(childTargetPos))
-            {
-                // Check if the position is currently occupied by one of our own cubes
-                bool isOccupiedByUs = false;
-                for (int j = 0; j < childCubes.Count; j++)
+                // Get block ID from renderer - we need to find the visual child
+                Renderer cubeRenderer = cube.GetComponentInChildren<Renderer>();
+                if (cubeRenderer != null)
                 {
-                    Vector2Int currentChildPos = currentGridPos + childRelativePositions[j];
-                    if (currentChildPos == childTargetPos)
-                    {
-                        isOccupiedByUs = true;
-                        break;
-                    }
+                    int blockID = GridManager.Instance.GetColorID(cubeRenderer.material);
+                    childBlockIDs.Add(blockID);
+                }
+                else
+                {
+                    // If no renderer found, use default ID
+                    childBlockIDs.Add(0);
+                    Debug.LogWarning("No renderer found for cube: " + cube.name);
                 }
 
-                if (!isOccupiedByUs)
-                    return false;
+                // Add the animator to our list
+                cubeAnimators.Add(holderAnimator);
+
+                // Map the collider to its animator
+                colliderToAnimator.Add(holderCollider, holderAnimator);
+            }
+            else
+            {
+                Debug.LogWarning("Could not find collider or animator for cube: " + cube.name);
             }
         }
 
-        return true;
+        Debug.Log("Found " + childCubes.Count + " cubes with " + cubeAnimators.Count + " animators");
     }
 
-    private void UpdateGridState(Vector2Int targetGridPos)
+    // Trigger animation with delay between cubes
+    private IEnumerator TriggerAnimationWithDelay(string triggerName)
     {
-        // Clear current positions
-        for (int i = 0; i < childCubes.Count; i++)
+        for (int i = 0; i < cubeAnimators.Count; i++)
         {
-            Vector2Int currentChildPos = currentGridPos + childRelativePositions[i];
-            GridManager.Instance.UpdateGridPosition(currentChildPos, new Vector2Int(-1, -1), 0); // Clear old position
-        }
-
-        // Set new positions
-        for (int i = 0; i < childCubes.Count; i++)
-        {
-            Vector2Int targetChildPos = targetGridPos + childRelativePositions[i];
-            GridManager.Instance.UpdateGridPosition(new Vector2Int(-1, -1), targetChildPos, childBlockIDs[i]);
+            if (cubeAnimators[i] != null)
+            {
+                cubeAnimators[i].Play(triggerName, 0, 0f);
+                yield return new WaitForSeconds(animationDelayBetweenCubes);
+            }
         }
     }
 
@@ -131,30 +134,39 @@ public class CubeMovement : MonoBehaviour
         // Get mouse position from Input System
         Vector2 mousePosition = Mouse.current.position.ReadValue();
 
-        // Handle selection
-        if (Mouse.current.leftButton.wasPressedThisFrame)
+        // Handle selection and hover
+        Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+        RaycastHit hit;
+
+        bool isHoveringThisFrame = false;
+
+        if (Physics.Raycast(ray, out hit))
         {
-            RaycastHit hit;
-            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
-
-            if (Physics.Raycast(ray, out hit))
+            // Check if we hit one of our cube holders' colliders
+            if (colliderToAnimator.ContainsKey(hit.collider))
             {
-                // Check if we hit this object or any of its children
-                Transform hitTransform = hit.transform;
-                bool isOurCube = (hitTransform == transform);
+                isHoveringThisFrame = true;
 
-                foreach (Transform child in childCubes)
+                // We're hovering over one of our cubes
+                if (!isHovering)
                 {
-                    if (hitTransform == child)
+                    // First time hovering over this shape
+                    isHovering = true;
+
+                    // Only play enter animation if we haven't played it already in this hover session
+                    // and we're not dragging
+                    if (!hoverEnterAnimationPlayed && !isDragging)
                     {
-                        isOurCube = true;
-                        break;
+                        hoverEnterAnimationPlayed = true;
+                        StartCoroutine(TriggerAnimationWithDelay(HOVER_ENTER_TRIGGER));
                     }
                 }
 
-                if (isOurCube)
+                // Check for mouse press on our cubes
+                if (Mouse.current.leftButton.wasPressedThisFrame)
                 {
                     isDragging = true;
+                    StartCoroutine(TriggerAnimationWithDelay(CLICK_TRIGGER));
 
                     Vector3 hitPointOnPlane = new Vector3(hit.point.x, 0, hit.point.z);
                     Vector3 objectPositionOnPlane = new Vector3(transform.position.x, 0, transform.position.z);
@@ -162,11 +174,36 @@ public class CubeMovement : MonoBehaviour
                 }
             }
         }
-        else if (Mouse.current.leftButton.wasReleasedThisFrame)
+
+        // Only consider the mouse to have left if it's not hovering over any part of the shape
+        // AND we're not dragging
+        if (!isHoveringThisFrame && isHovering && !isDragging)
         {
-            isDragging = false;
+            isHovering = false;
+            hoverEnterAnimationPlayed = false; // Reset so we can play it again next time
+            StartCoroutine(TriggerAnimationWithDelay(HOVER_EXIT_TRIGGER));
         }
 
+        // Check for mouse release
+        if (Mouse.current.leftButton.wasReleasedThisFrame && isDragging)
+        {
+            isDragging = false;
+            StartCoroutine(TriggerAnimationWithDelay(RELEASE_TRIGGER));
+            
+            // We're still hovering, so make sure we don't play enter animation again
+            if (isHoveringThisFrame)
+            {
+                isHovering = true;
+                hoverEnterAnimationPlayed = true;
+            }
+        }
+
+        // Movement handling
+        HandleMovement(mousePosition);
+    }
+
+    private void HandleMovement(Vector2 mousePosition)
+    {
         // Movement
         if (isDragging)
         {
@@ -272,8 +309,79 @@ public class CubeMovement : MonoBehaviour
             }
         }
 
-
         // Smooth movement
         transform.position = Vector3.Lerp(transform.position, targetPosition, smoothSpeed * Time.deltaTime);
+    }
+
+    private Vector3 SnapToGrid(Vector3 position)
+    {
+        return new Vector3(
+            Mathf.Round(position.x),
+            position.y,
+            Mathf.Round(position.z)
+        );
+    }
+
+    private bool IsMoveValid(Vector2Int from, Vector2Int to)
+    {
+        // Only allow movement of 1 grid cell at a time (Manhattan distance)
+        int distance = Mathf.Abs(to.x - from.x) + Mathf.Abs(to.y - from.y);
+
+        // Only allow orthogonal movement (not diagonal)
+        bool isOrthogonal = (to.x == from.x || to.y == from.y);
+
+        // Return true if move is only 1 cell away and orthogonal
+        return distance <= 1 && isOrthogonal && CanMoveTo(to);
+    }
+
+    private bool CanMoveTo(Vector2Int targetGridPos)
+    {
+        // Check each child position
+        for (int i = 0; i < childCubes.Count; i++)
+        {
+            Vector2Int childTargetPos = targetGridPos + childRelativePositions[i];
+
+            // Check if position is valid
+            if (!GridManager.Instance.IsInBounds(childTargetPos))
+                return false;
+
+            // Check if position is empty or occupied by this group
+            if (!GridManager.Instance.IsPositionEmpty(childTargetPos))
+            {
+                // Check if the position is currently occupied by one of our own cubes
+                bool isOccupiedByUs = false;
+                for (int j = 0; j < childCubes.Count; j++)
+                {
+                    Vector2Int currentChildPos = currentGridPos + childRelativePositions[j];
+                    if (currentChildPos == childTargetPos)
+                    {
+                        isOccupiedByUs = true;
+                        break;
+                    }
+                }
+
+                if (!isOccupiedByUs)
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void UpdateGridState(Vector2Int targetGridPos)
+    {
+        // Clear current positions
+        for (int i = 0; i < childCubes.Count; i++)
+        {
+            Vector2Int currentChildPos = currentGridPos + childRelativePositions[i];
+            GridManager.Instance.UpdateGridPosition(currentChildPos, new Vector2Int(-1, -1), 0); // Clear old position
+        }
+
+        // Set new positions
+        for (int i = 0; i < childCubes.Count; i++)
+        {
+            Vector2Int targetChildPos = targetGridPos + childRelativePositions[i];
+            GridManager.Instance.UpdateGridPosition(new Vector2Int(-1, -1), targetChildPos, childBlockIDs[i]);
+        }
     }
 }
