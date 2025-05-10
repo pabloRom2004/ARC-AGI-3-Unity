@@ -1,4 +1,5 @@
 using UnityEngine;
+using TMPro;
 
 public class GridManager : MonoBehaviour
 {
@@ -9,6 +10,8 @@ public class GridManager : MonoBehaviour
     private int[,] gridState; // 0 = empty, 1-9 = block ID based on color
     private const int GridSize = 16; // 16x16 grid
     
+    [SerializeField] private TextMeshProUGUI textGrid;
+    private string gridVisuals;
     private void Awake()
     {
         // Singleton pattern
@@ -65,7 +68,7 @@ public class GridManager : MonoBehaviour
         // Find the matching material in the array
         for (int i = 0; i < colorMaterials.Length; i++)
         {
-            if (material == colorMaterials[i])
+            if (material.name[7] == colorMaterials[i].name[7])
                 return i + 1; // IDs are 1-based (0 is empty)
         }
         
@@ -106,5 +109,16 @@ public class GridManager : MonoBehaviour
         // Set new position
         if (IsInBounds(newPos))
             gridState[newPos.x, newPos.y] = blockID;
+
+        gridVisuals = "";
+        for (int i = 0; i < 16; i++)
+        {
+            for (int y = 0; y < 16; y++)
+            {
+                gridVisuals +=  gridState[y, 15 - i] + " ";
+            }
+            gridVisuals += "\n";
+        }
+        textGrid.text = gridVisuals;
     }
 }

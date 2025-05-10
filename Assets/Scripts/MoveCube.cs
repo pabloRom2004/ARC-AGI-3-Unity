@@ -113,7 +113,7 @@ public class CubeMovement : MonoBehaviour
             }
         }
 
-        Debug.Log("Found " + childCubes.Count + " cubes with " + cubeAnimators.Count + " animators");
+        // Debug.Log("Found " + childCubes.Count + " cubes with " + cubeAnimators.Count + " animators");
     }
 
     // Trigger animation with delay between cubes
@@ -168,8 +168,8 @@ public class CubeMovement : MonoBehaviour
                     isDragging = true;
                     StartCoroutine(TriggerAnimationWithDelay(CLICK_TRIGGER));
 
-                    Vector3 hitPointOnPlane = new Vector3(hit.point.x, 0, hit.point.z);
-                    Vector3 objectPositionOnPlane = new Vector3(transform.position.x, 0, transform.position.z);
+                    Vector3 hitPointOnPlane = new Vector3(hit.point.x, 1, hit.point.z);
+                    Vector3 objectPositionOnPlane = new Vector3(transform.position.x, 1, transform.position.z);
                     offset = objectPositionOnPlane - hitPointOnPlane;
                 }
             }
@@ -181,7 +181,7 @@ public class CubeMovement : MonoBehaviour
         {
             isHovering = false;
             hoverEnterAnimationPlayed = false; // Reset so we can play it again next time
-            StartCoroutine(TriggerAnimationWithDelay(HOVER_EXIT_TRIGGER));
+            //StartCoroutine(TriggerAnimationWithDelay(HOVER_EXIT_TRIGGER));
         }
 
         // Check for mouse release

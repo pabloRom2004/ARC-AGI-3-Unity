@@ -7,33 +7,17 @@ public class CubeSequentialActivator : MonoBehaviour
     [Tooltip("The parent object containing all the cubes (e.g., Grid or Move Parent)")]
     [SerializeField] private Transform cubeParent;
     
-    [Tooltip("The delay between each cube activation in seconds")]
-    [SerializeField] private float activationDelay = 0.025f;
+    [Tooltip("The total time to activate all cubes in seconds")]
+    [SerializeField] private float totalActivationTime = 1.0f;
     
     [Tooltip("Tag of the cube objects to find")]
     [SerializeField] private string cubeTag = "Cube";
     
     private List<GameObject> orderedCubes = new List<GameObject>();
     
-    // private void Awake()
-    // {
-    //     // If no parent is assigned, use this object
-    //     if (cubeParent == null)
-    //         cubeParent = transform;
-        
-    //     // Find and gather all cubes in hierarchy order
-    //     FindCubesInOrder(cubeParent);
-        
-    //     // Disable all cubes initially
-    //     foreach (GameObject cube in orderedCubes)
-    //     {
-    //         cube.SetActive(false);
-    //     }
-    // }
-    
     private void Start()
     {
-                // If no parent is assigned, use this object
+        // If no parent is assigned, use this object
         if (cubeParent == null)
             cubeParent = transform;
         
@@ -45,6 +29,7 @@ public class CubeSequentialActivator : MonoBehaviour
         {
             cube.SetActive(false);
         }
+        
         // Start the sequence to enable cubes one by one
         StartCoroutine(ActivateCubesSequentially());
     }
@@ -73,18 +58,28 @@ public class CubeSequentialActivator : MonoBehaviour
         // Wait a frame to ensure everything is initialized
         yield return null;
         
-        Debug.Log($"Activating {orderedCubes.Count} cubes with {activationDelay}s delay");
+        int cubeCount = orderedCubes.Count;
+        float delay = 0f;
         
-        // Activate each cube with the specified delay
-        for (int i = 0; i < orderedCubes.Count; i++)
+        // Calculate the delay between cubes based on total time
+        if (cubeCount > 1)
+        {
+            delay = totalActivationTime / (cubeCount - 1);
+        }
+        
+        // Activate each cube with the calculated delay
+        for (int i = 0; i < cubeCount; i++)
         {
             if (orderedCubes[i] != null)
             {
                 orderedCubes[i].SetActive(true);
-                // Debug.Log($"Activated cube {i+1}/{orderedCubes.Count}: {orderedCubes[i].name}");
+                orderedCubes[i].GetComponent<Animator>().Play("CubeEnter");
                 
-                // Wait for the specified delay
-                yield return new WaitForSeconds(activationDelay);
+                // Wait for the calculated delay (skip delay after the last cube)
+                if (i < cubeCount - 1)
+                {
+                    yield return new WaitForSeconds(delay);
+                }
             }
         }
     }
