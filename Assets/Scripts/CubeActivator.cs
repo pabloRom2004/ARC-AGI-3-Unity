@@ -4,34 +4,55 @@ using UnityEngine;
 
 public class CubeSequentialActivator : MonoBehaviour
 {
-    [Tooltip("The parent object containing all the cubes (e.g., Grid or Move Parent)")]
-    [SerializeField] private Transform cubeParent;
-    
     [Tooltip("The total time to activate all cubes in seconds")]
     [SerializeField] private float totalActivationTime = 1.0f;
     
     [Tooltip("Tag of the cube objects to find")]
     [SerializeField] private string cubeTag = "Cube";
     
+    private Transform cubeParent;
     private List<GameObject> orderedCubes = new List<GameObject>();
+    private Coroutine activationCoroutine;
     
-    private void Start()
+    public void SetCubeParent(Transform newParent)
     {
-        // If no parent is assigned, use this object
-        if (cubeParent == null)
-            cubeParent = transform;
-        
-        // Find and gather all cubes in hierarchy order
-        FindCubesInOrder(cubeParent);
-        
-        // Disable all cubes initially
-        foreach (GameObject cube in orderedCubes)
+        // Stop any ongoing activation
+        if (activationCoroutine != null)
         {
-            cube.SetActive(false);
+            StopCoroutine(activationCoroutine);
+            activationCoroutine = null;
         }
         
+        cubeParent = newParent;
+        orderedCubes.Clear();
+        
+        // Find and gather all cubes in hierarchy order
+        if (cubeParent != null)
+        {
+            FindCubesInOrder(cubeParent);
+            
+            // Disable all cubes and their colliders initially
+            foreach (GameObject cube in orderedCubes)
+            {
+                cube.SetActive(false);
+                
+                // Disable box collider if it exists
+                BoxCollider boxCollider = cube.GetComponent<BoxCollider>();
+                if (boxCollider != null)
+                {
+                    boxCollider.enabled = false;
+                }
+            }
+        }
+    }
+    
+    public void StartActivationSequence()
+    {
+        if (cubeParent == null || orderedCubes.Count == 0)
+            return;
+            
         // Start the sequence to enable cubes one by one
-        StartCoroutine(ActivateCubesSequentially());
+        activationCoroutine = StartCoroutine(ActivateCubesSequentially());
     }
     
     // Recursively find cubes in hierarchy order
@@ -67,13 +88,19 @@ public class CubeSequentialActivator : MonoBehaviour
             delay = totalActivationTime / (cubeCount - 1);
         }
         
-        // Activate each cube with the calculated delay
+        // Activate each cube with the calculated delay (but keep colliders disabled)
         for (int i = 0; i < cubeCount; i++)
         {
             if (orderedCubes[i] != null)
             {
                 orderedCubes[i].SetActive(true);
-                orderedCubes[i].GetComponent<Animator>().Play("CubeEnter");
+                
+                // Get the animator if it exists
+                Animator animator = orderedCubes[i].GetComponent<Animator>();
+                if (animator != null && orderedCubes[i].gameObject.activeSelf)
+                {
+                    animator.Play("CubeEnter");
+                }
                 
                 // Wait for the calculated delay (skip delay after the last cube)
                 if (i < cubeCount - 1)
@@ -82,5 +109,23 @@ public class CubeSequentialActivator : MonoBehaviour
                 }
             }
         }
+        
+        // Add a small delay to ensure all animations have time to complete
+        yield return new WaitForSeconds(0.5f);
+        
+        // Enable all colliders after all cubes are activated and animations are complete
+        foreach (GameObject cube in orderedCubes)
+        {
+            if (cube != null)
+            {
+                BoxCollider boxCollider = cube.GetComponent<BoxCollider>();
+                if (boxCollider != null)
+                {
+                    boxCollider.enabled = true;
+                }
+            }
+        }
+        
+        activationCoroutine = null;
     }
 }

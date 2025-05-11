@@ -9,6 +9,8 @@ public class PickUp : MonoBehaviour
     private float elevationHeight = 2f;
     private float animationDelayBetweenCubes = 0.025f; // Delay between cube animations
 
+    [SerializeField] private GameObject pickupSymbolPrefab; // Assign the pickup symbol prefab in inspector
+
     private Camera mainCamera;
     private bool isPickedUp = false;
     private Vector3 offset;
@@ -32,6 +34,14 @@ public class PickUp : MonoBehaviour
     // Animation trigger names
     private const string PICKUP_TRIGGER = "PickUpClick";
     private const string PLACE_TRIGGER = "PickUpRelease";
+    private const string NOT_PLACE_TRIGGER = "PickUpCantRelease";
+    private const string HOVER_ENTER_TRIGGER = "MoveHoverEnter";
+    private const string CANT_PLACE_TRIGGER = "PickUpCantPlace";
+
+    // Hover tracking
+    private bool isHovering = false;
+    private bool hoverEnterAnimationPlayed = false;
+    private List<bool> cubeCanPlaceStatus = new List<bool>();
 
     private void Start()
     {
@@ -42,6 +52,78 @@ public class PickUp : MonoBehaviour
 
         // Find all child cube holders with their colliders, animators, and outlines
         CollectCubeComponents();
+
+        // Initialize placement status list
+        for (int i = 0; i < childCubes.Count; i++)
+        {
+            cubeCanPlaceStatus.Add(true);
+        }
+
+        // Add the pickup symbol to the top left cube
+        AddMovementSymbol();
+    }
+
+    private void AddMovementSymbol()
+    {
+        if (pickupSymbolPrefab == null || childCubes.Count == 0)
+            return;
+
+        // Find the "top left" cube (minimum x, maximum z)
+        Transform topLeftCube = FindTopLeftCube();
+
+        if (topLeftCube != null)
+        {
+            // Find the visual child of the cube to parent our symbol to
+            Transform cubeVisual = FindCubeVisual(topLeftCube);
+
+            if (cubeVisual != null)
+            {
+                // Instantiate the symbol as a child of the cube visual
+                GameObject symbol = Instantiate(pickupSymbolPrefab, cubeVisual);
+                symbol.transform.localPosition = Vector3.zero;
+                symbol.transform.localRotation = Quaternion.identity;
+                symbol.transform.localScale = Vector3.one;
+            }
+        }
+    }
+
+    private Transform FindTopLeftCube()
+    {
+        if (childCubes.Count == 0)
+            return null;
+
+        // Start with the first cube as the candidate
+        Transform topLeftCube = childCubes[0];
+        Vector2Int topLeftPos = childRelativePositions[0];
+
+        // Find the cube with the minimum x and maximum z (top left in grid coordinates)
+        for (int i = 1; i < childCubes.Count; i++)
+        {
+            Vector2Int currentPos = childRelativePositions[i];
+
+            // If this cube has a lower x value, or the same x but higher z, it's more "top left"
+            if (currentPos.y > topLeftPos.y ||
+                (currentPos.y == topLeftPos.y && currentPos.x < topLeftPos.x))
+            {
+                topLeftCube = childCubes[i];
+                topLeftPos = currentPos;
+            }
+        }
+
+        return topLeftCube;
+    }
+
+    private Transform FindCubeVisual(Transform cube)
+    {
+        // First check if the cube has a child that could be the visual
+        if (cube.childCount > 0)
+        {
+            // Usually the first child is the visual container
+            return cube.GetChild(0);
+        }
+
+        // If we can't find a visual child, return the cube itself
+        return cube;
     }
 
     private void CollectCubeComponents()
@@ -115,12 +197,54 @@ public class PickUp : MonoBehaviour
         // Debug.Log("Found " + childCubes.Count + " cubes with " + cubeAnimators.Count + " animators and " + cubeOutlines.Count + " outlines");
     }
 
-    // Trigger animation with delay between cubes
+    // Add this as a new field at the class level
+    [Tooltip("Total time for all cube animations, regardless of cube count")]
+    [SerializeField] private float totalAnimationTime = 0.1f;
+
+    // Replace the TriggerAnimationWithDelay method with this:
     private IEnumerator TriggerAnimationWithDelay(string triggerName)
     {
-        for (int i = 0; i < cubeAnimators.Count; i++)
+        int cubeCount = cubeAnimators.Count;
+        float calculatedDelay = 0f;
+
+        // Calculate the delay between cubes based on total time
+        if (cubeCount > 1)
+        {
+            calculatedDelay = totalAnimationTime / (cubeCount - 1);
+        }
+
+        // First, initialize all animations at frame 0 and pause them
+        for (int i = 0; i < cubeCount; i++)
         {
             if (cubeAnimators[i] != null)
+            {
+                cubeAnimators[i].Play(triggerName, 0, 0f);
+                cubeAnimators[i].speed = 0; // Pause animation at first frame
+            }
+        }
+
+        // Then unpause each animation with calculated delay
+        for (int i = 0; i < cubeCount; i++)
+        {
+            if (cubeAnimators[i] != null)
+            {
+                cubeAnimators[i].speed = 1; // Resume animation
+
+                // Skip delay after the last cube
+                if (i < cubeCount - 1)
+                {
+                    yield return new WaitForSeconds(calculatedDelay);
+                }
+            }
+        }
+    }
+
+    // Trigger animation for specific cubes
+    private IEnumerator TriggerAnimationForSpecificCubes(string triggerName, List<int> indices)
+    {
+        foreach (int i in indices)
+        {
+            if (i < cubeAnimators.Count && cubeAnimators[i] != null)
             {
                 cubeAnimators[i].Play(triggerName, 0, 0f);
                 yield return new WaitForSeconds(animationDelayBetweenCubes);
@@ -133,20 +257,46 @@ public class PickUp : MonoBehaviour
         // Get mouse position from Input System
         Vector2 mousePosition = Mouse.current.position.ReadValue();
 
-        // Handle selection
-        if (!isPickedUp && Mouse.current.leftButton.wasPressedThisFrame)
-        {
-            Ray ray = mainCamera.ScreenPointToRay(mousePosition);
-            RaycastHit hit;
+        Ray ray = mainCamera.ScreenPointToRay(mousePosition);
+        RaycastHit hit;
+        bool isHoveringThisFrame = false;
 
-            if (Physics.Raycast(ray, out hit))
+        // Handle hover animation
+        if (Physics.Raycast(ray, out hit))
+        {
+            // Check if we hit one of our cube holders' colliders
+            if (colliderToAnimator.ContainsKey(hit.collider))
             {
-                // Check if we hit one of our cube holders' colliders
-                if (colliderToAnimator.ContainsKey(hit.collider))
+                isHoveringThisFrame = true;
+
+                // We're hovering over one of our cubes
+                if (!isHovering && !isPickedUp)
+                {
+                    // First time hovering over this shape
+                    isHovering = true;
+
+                    // Only play enter animation if we haven't played it already in this hover session
+                    if (!hoverEnterAnimationPlayed)
+                    {
+                        hoverEnterAnimationPlayed = true;
+                        StartCoroutine(TriggerAnimationWithDelay(HOVER_ENTER_TRIGGER));
+                    }
+                }
+
+                // Handle selection
+                if (!isPickedUp && Mouse.current.leftButton.wasPressedThisFrame)
                 {
                     PickUpObject(hit.point);
                 }
             }
+        }
+
+        // Only consider the mouse to have left if it's not hovering over any part of the shape
+        // AND we're not dragging
+        if (!isHoveringThisFrame && isHovering && !isPickedUp)
+        {
+            isHovering = false;
+            hoverEnterAnimationPlayed = false; // Reset so we can play it again next time
         }
 
         // Handle releasing the object
@@ -176,7 +326,10 @@ public class PickUp : MonoBehaviour
         // Remove from grid while picked up
         RemoveFromGrid();
 
-        // Elevate the object
+        // Elevate the object INSTANTLY
+        Vector3 newPosition = transform.position;
+        newPosition.y = elevationHeight;
+        transform.position = newPosition;
         targetPosition = new Vector3(transform.position.x, elevationHeight, transform.position.z);
 
         // Play pickup animation
@@ -190,7 +343,6 @@ public class PickUp : MonoBehaviour
         // Check if placement is valid
         if (canPlace)
         {
-            // Place at current position and update grid
             targetPosition = new Vector3(targetPosition.x, 0f, targetPosition.z);
             transform.position = targetPosition;
             UpdateGridState(currentGridPos);
@@ -200,10 +352,10 @@ public class PickUp : MonoBehaviour
         {
             // Return to start position
             targetPosition = startPosition;
-            transform.position = targetPosition;
+            transform.position = new Vector3(startPosition.x, 0f, startPosition.z);
             currentGridPos = GridManager.Instance.WorldToGrid(startPosition);
             UpdateGridState(currentGridPos);
-            StartCoroutine(TriggerAnimationWithDelay(PLACE_TRIGGER));
+            StartCoroutine(TriggerAnimationWithDelay(NOT_PLACE_TRIGGER));
         }
 
         // Reset outline materials
@@ -233,8 +385,11 @@ public class PickUp : MonoBehaviour
             targetPosition = new Vector3(snappedPosition.x, elevationHeight, snappedPosition.z);
         }
 
-        // Smooth movement
-        transform.position = Vector3.Lerp(transform.position, targetPosition, smoothSpeed * Time.deltaTime);
+        // Smooth movement (X and Z only, Y is already set instantly)
+        Vector3 newPosition = transform.position;
+        newPosition.x = Mathf.Lerp(newPosition.x, targetPosition.x, smoothSpeed * Time.deltaTime);
+        newPosition.z = Mathf.Lerp(newPosition.z, targetPosition.z, smoothSpeed * Time.deltaTime);
+        transform.position = newPosition;
     }
 
     private Vector3 SnapToGrid(Vector3 position)
@@ -248,14 +403,18 @@ public class PickUp : MonoBehaviour
 
     private void CheckPlacement()
     {
-        print(canPlace);
         canPlace = true;
+        List<int> invalidCubeIndices = new List<int>();
 
         // Check each child cube for valid placement
         for (int i = 0; i < childCubes.Count; i++)
         {
             Vector2Int childGridPos = currentGridPos + childRelativePositions[i];
             bool isValidPosition = IsValidPlacement(childGridPos);
+
+            // Track if the placement status changed
+            bool statusChanged = (cubeCanPlaceStatus[i] != isValidPosition);
+            cubeCanPlaceStatus[i] = isValidPosition;
 
             // Update outline material based on placement validity
             if (i < cubeOutlines.Count && cubeOutlines[i] != null)
@@ -267,7 +426,20 @@ public class PickUp : MonoBehaviour
             if (!isValidPosition)
             {
                 canPlace = false;
+                invalidCubeIndices.Add(i);
+
+                // Play PickUpCantPlace animation when status changes to invalid
+                if (statusChanged)
+                {
+                    cubeAnimators[i].Play(CANT_PLACE_TRIGGER, 0, 0f);
+                }
             }
+        }
+
+        // If we have invalid cubes but haven't played the animation yet, play it
+        if (invalidCubeIndices.Count > 0)
+        {
+            // Animation is triggered per cube when status changes
         }
     }
 
@@ -313,6 +485,12 @@ public class PickUp : MonoBehaviour
             {
                 cubeOutlines[i].material = originalMaterials[i];
             }
+        }
+
+        // Reset can place status
+        for (int i = 0; i < cubeCanPlaceStatus.Count; i++)
+        {
+            cubeCanPlaceStatus[i] = true;
         }
     }
 }

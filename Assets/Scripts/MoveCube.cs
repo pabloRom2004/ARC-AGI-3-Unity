@@ -8,6 +8,15 @@ public class CubeMovement : MonoBehaviour
     private float smoothSpeed = 20f;
     private float animationDelayBetweenCubes = 0.025f; // Delay between cube animations
 
+    [SerializeField] private GameObject fourDirectionArrowPrefab; // Prefab for 4-way movement
+    [SerializeField] private GameObject twoDirectionArrowPrefab; // Prefab for 2-way movement (default is horizontal)
+
+    // Movement direction controls
+    [SerializeField] private bool canMoveUp = true;
+    [SerializeField] private bool canMoveDown = true;
+    [SerializeField] private bool canMoveLeft = true;
+    [SerializeField] private bool canMoveRight = true;
+
     private Camera mainCamera;
     private bool isDragging = false;
     private Vector3 offset;
@@ -37,6 +46,98 @@ public class CubeMovement : MonoBehaviour
 
         // Find all child cube holders with their colliders and animators
         CollectCubeComponents();
+
+        // Add direction arrow symbol to the top left cube
+        AddDirectionArrowSymbol();
+    }
+
+    private void AddDirectionArrowSymbol()
+    {
+        // Find the "top left" cube (minimum x, maximum z)
+        Transform topLeftCube = FindTopLeftCube();
+
+        if (topLeftCube == null)
+            return;
+
+        // Find the visual child of the cube to parent our symbol to
+        Transform cubeVisual = FindCubeVisual(topLeftCube);
+
+        if (cubeVisual == null)
+            return;
+
+        // Determine which prefab to use and rotation based on allowed directions
+        bool horizontalMovement = canMoveLeft || canMoveRight;
+        bool verticalMovement = canMoveUp || canMoveDown;
+
+        GameObject symbolPrefab = null;
+        Quaternion rotation = Quaternion.identity;
+
+        // Decide which prefab to use
+        if (horizontalMovement && verticalMovement)
+        {
+            // Use 4-way arrow if can move in both directions
+            symbolPrefab = fourDirectionArrowPrefab;
+        }
+        else if (horizontalMovement || verticalMovement)
+        {
+            // Use 2-way arrow if only one axis is enabled
+            symbolPrefab = twoDirectionArrowPrefab;
+
+            // Rotate if only vertical movement is allowed
+            if (verticalMovement && !horizontalMovement)
+            {
+                rotation = Quaternion.Euler(0, 90, 0); // Rotate 90 degrees around Y
+            }
+        }
+
+        // Only instantiate if we have a valid prefab
+        if (symbolPrefab != null)
+        {
+            // Instantiate the symbol as a child of the cube visual
+            GameObject symbol = Instantiate(symbolPrefab, cubeVisual);
+            symbol.transform.localPosition = Vector3.zero;
+            symbol.transform.localRotation = rotation;
+            symbol.transform.localScale = Vector3.one;
+        }
+    }
+
+    private Transform FindTopLeftCube()
+    {
+        if (childCubes.Count == 0)
+            return null;
+
+        // Start with the first cube as the candidate
+        Transform topLeftCube = childCubes[0];
+        Vector2Int topLeftPos = childRelativePositions[0];
+
+        // Modified to prioritize top (maximum y) first, then left (minimum x)
+        for (int i = 1; i < childCubes.Count; i++)
+        {
+            Vector2Int currentPos = childRelativePositions[i];
+
+            // Prioritize higher y (top), then use lower x (left) as secondary criteria
+            if (currentPos.y > topLeftPos.y ||
+                (currentPos.y == topLeftPos.y && currentPos.x < topLeftPos.x))
+            {
+                topLeftCube = childCubes[i];
+                topLeftPos = currentPos;
+            }
+        }
+
+        return topLeftCube;
+    }
+
+    private Transform FindCubeVisual(Transform cube)
+    {
+        // First check if the cube has a child that could be the visual
+        if (cube.childCount > 0)
+        {
+            // Usually the first child is the visual container
+            return cube.GetChild(0);
+        }
+
+        // If we can't find a visual child, return the cube itself
+        return cube;
     }
 
     private void CollectCubeComponents()
@@ -116,15 +217,34 @@ public class CubeMovement : MonoBehaviour
         // Debug.Log("Found " + childCubes.Count + " cubes with " + cubeAnimators.Count + " animators");
     }
 
-    // Trigger animation with delay between cubes
+    // Add this as a new field at the class level
+    [Tooltip("Total time for all cube animations, regardless of cube count")]
+    [SerializeField] private float totalAnimationTime = 0.1f;
+
+    // Replace the TriggerAnimationWithDelay method with this:
     private IEnumerator TriggerAnimationWithDelay(string triggerName)
     {
-        for (int i = 0; i < cubeAnimators.Count; i++)
+        int cubeCount = cubeAnimators.Count;
+        float calculatedDelay = 0f;
+
+        // Calculate the delay between cubes based on total time
+        if (cubeCount > 1)
+        {
+            calculatedDelay = totalAnimationTime / (cubeCount - 1);
+        }
+
+        // Animate each cube with calculated delay
+        for (int i = 0; i < cubeCount; i++)
         {
             if (cubeAnimators[i] != null)
             {
                 cubeAnimators[i].Play(triggerName, 0, 0f);
-                yield return new WaitForSeconds(animationDelayBetweenCubes);
+
+                // Skip delay after the last cube
+                if (i < cubeCount - 1)
+                {
+                    yield return new WaitForSeconds(calculatedDelay);
+                }
             }
         }
     }
@@ -181,7 +301,6 @@ public class CubeMovement : MonoBehaviour
         {
             isHovering = false;
             hoverEnterAnimationPlayed = false; // Reset so we can play it again next time
-            //StartCoroutine(TriggerAnimationWithDelay(HOVER_EXIT_TRIGGER));
         }
 
         // Check for mouse release
@@ -189,7 +308,7 @@ public class CubeMovement : MonoBehaviour
         {
             isDragging = false;
             StartCoroutine(TriggerAnimationWithDelay(RELEASE_TRIGGER));
-            
+
             // We're still hovering, so make sure we don't play enter animation again
             if (isHoveringThisFrame)
             {
@@ -237,80 +356,83 @@ public class CubeMovement : MonoBehaviour
                 // Try alternative moves if direct move is invalid
                 else
                 {
-                    // Determine which axis has the larger difference
-                    bool horizontalPriority = Mathf.Abs(targetGridPos.x - currentGridPos.x) >=
-                                             Mathf.Abs(targetGridPos.y - currentGridPos.y);
-
-                    // Create arrays for the primary and secondary directions to try
-                    Vector2Int[] directionsToTry = new Vector2Int[2];
-
-                    // Set up the directions to try based on priority
-                    if (horizontalPriority)
-                    {
-                        // Try horizontal first
-                        directionsToTry[0] = new Vector2Int(
-                            (targetGridPos.x > currentGridPos.x) ? currentGridPos.x + 1 :
-                            (targetGridPos.x < currentGridPos.x) ? currentGridPos.x - 1 :
-                            currentGridPos.x,
-                            currentGridPos.y
-                        );
-
-                        // Then try vertical
-                        directionsToTry[1] = new Vector2Int(
-                            currentGridPos.x,
-                            (targetGridPos.y > currentGridPos.y) ? currentGridPos.y + 1 :
-                            (targetGridPos.y < currentGridPos.y) ? currentGridPos.y - 1 :
-                            currentGridPos.y
-                        );
-                    }
-                    else
-                    {
-                        // Try vertical first
-                        directionsToTry[0] = new Vector2Int(
-                            currentGridPos.x,
-                            (targetGridPos.y > currentGridPos.y) ? currentGridPos.y + 1 :
-                            (targetGridPos.y < currentGridPos.y) ? currentGridPos.y - 1 :
-                            currentGridPos.y
-                        );
-
-                        // Then try horizontal
-                        directionsToTry[1] = new Vector2Int(
-                            (targetGridPos.x > currentGridPos.x) ? currentGridPos.x + 1 :
-                            (targetGridPos.x < currentGridPos.x) ? currentGridPos.x - 1 :
-                            currentGridPos.x,
-                            currentGridPos.y
-                        );
-                    }
-
-                    // Try each direction in order
-                    for (int i = 0; i < directionsToTry.Length; i++)
-                    {
-                        Vector2Int moveTarget = directionsToTry[i];
-
-                        // Skip if move doesn't actually change position
-                        if (moveTarget == currentGridPos)
-                            continue;
-
-                        // Check if move is valid
-                        if (IsMoveValid(currentGridPos, moveTarget))
-                        {
-                            // Update grid state
-                            UpdateGridState(moveTarget);
-
-                            // Update tracking variables
-                            currentGridPos = moveTarget;
-                            targetPosition = new Vector3(moveTarget.x, transform.position.y, moveTarget.y);
-
-                            // Break the loop since we found a valid move
-                            break;
-                        }
-                    }
+                    TryAlternativeMove(targetGridPos);
                 }
             }
         }
 
         // Smooth movement
         transform.position = Vector3.Lerp(transform.position, targetPosition, smoothSpeed * Time.deltaTime);
+    }
+
+    private void TryAlternativeMove(Vector2Int targetGridPos)
+    {
+        // Determine which axis has the larger difference
+        int xDiff = targetGridPos.x - currentGridPos.x;
+        int yDiff = targetGridPos.y - currentGridPos.y;
+
+        bool horizontalPriority = Mathf.Abs(xDiff) >= Mathf.Abs(yDiff);
+
+        // Create vectors for the possible moves to try
+        List<Vector2Int> possibleMoves = new List<Vector2Int>();
+
+        // Add horizontal move if it's allowed and there's a difference
+        if (xDiff != 0)
+        {
+            if ((xDiff > 0 && canMoveRight) || (xDiff < 0 && canMoveLeft))
+            {
+                possibleMoves.Add(new Vector2Int(
+                    currentGridPos.x + (xDiff > 0 ? 1 : -1),
+                    currentGridPos.y
+                ));
+            }
+        }
+
+        // Add vertical move if it's allowed and there's a difference
+        if (yDiff != 0)
+        {
+            if ((yDiff > 0 && canMoveUp) || (yDiff < 0 && canMoveDown))
+            {
+                possibleMoves.Add(new Vector2Int(
+                    currentGridPos.x,
+                    currentGridPos.y + (yDiff > 0 ? 1 : -1)
+                ));
+            }
+        }
+
+        // If we have horizontal priority, try horizontal first, otherwise try vertical first
+        if (horizontalPriority)
+        {
+            possibleMoves.Sort((a, b) =>
+                (a.x != currentGridPos.x ? 0 : 1).CompareTo(b.x != currentGridPos.x ? 0 : 1));
+        }
+        else
+        {
+            possibleMoves.Sort((a, b) =>
+                (a.y != currentGridPos.y ? 0 : 1).CompareTo(b.y != currentGridPos.y ? 0 : 1));
+        }
+
+        // Try each possible move
+        foreach (Vector2Int moveTarget in possibleMoves)
+        {
+            // Skip if this would be no movement
+            if (moveTarget == currentGridPos)
+                continue;
+
+            // Check if move is valid
+            if (CanMoveTo(moveTarget))
+            {
+                // Update grid state
+                UpdateGridState(moveTarget);
+
+                // Update tracking variables
+                currentGridPos = moveTarget;
+                targetPosition = new Vector3(moveTarget.x, transform.position.y, moveTarget.y);
+
+                // We found a valid move, so stop looking
+                break;
+            }
+        }
     }
 
     private Vector3 SnapToGrid(Vector3 position)
@@ -324,14 +446,21 @@ public class CubeMovement : MonoBehaviour
 
     private bool IsMoveValid(Vector2Int from, Vector2Int to)
     {
+        // Check if this is a valid movement direction based on our constraints
+        bool isValidDirection =
+            (to.x > from.x && canMoveRight) ||  // Moving right
+            (to.x < from.x && canMoveLeft) ||   // Moving left
+            (to.y > from.y && canMoveUp) ||     // Moving up
+            (to.y < from.y && canMoveDown);     // Moving down
+
         // Only allow movement of 1 grid cell at a time (Manhattan distance)
         int distance = Mathf.Abs(to.x - from.x) + Mathf.Abs(to.y - from.y);
 
         // Only allow orthogonal movement (not diagonal)
         bool isOrthogonal = (to.x == from.x || to.y == from.y);
 
-        // Return true if move is only 1 cell away and orthogonal
-        return distance <= 1 && isOrthogonal && CanMoveTo(to);
+        // Return true if move is only 1 cell away, orthogonal, in an allowed direction, and the target is valid
+        return distance <= 1 && isOrthogonal && isValidDirection && CanMoveTo(to);
     }
 
     private bool CanMoveTo(Vector2Int targetGridPos)
