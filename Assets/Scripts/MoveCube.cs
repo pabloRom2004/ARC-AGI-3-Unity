@@ -6,7 +6,7 @@ using UnityEngine.InputSystem;
 public class CubeMovement : MonoBehaviour
 {
     private float smoothSpeed = 20f;
-    private float animationDelayBetweenCubes = 0.025f; // Delay between cube animations
+    private float totalAnimationTime = 0.1f;
 
     [SerializeField] private GameObject fourDirectionArrowPrefab; // Prefab for 4-way movement
     [SerializeField] private GameObject twoDirectionArrowPrefab; // Prefab for 2-way movement (default is horizontal)
@@ -216,10 +216,6 @@ public class CubeMovement : MonoBehaviour
 
         // Debug.Log("Found " + childCubes.Count + " cubes with " + cubeAnimators.Count + " animators");
     }
-
-    // Add this as a new field at the class level
-    [Tooltip("Total time for all cube animations, regardless of cube count")]
-    [SerializeField] private float totalAnimationTime = 0.1f;
 
     // Replace the TriggerAnimationWithDelay method with this:
     private IEnumerator TriggerAnimationWithDelay(string triggerName)
